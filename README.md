@@ -52,6 +52,12 @@ On MacOS, compiling should be as simple as
     cmake .
     make -j 4
 
+On Apple Silicon (ARM64) Macs the build system will automatically prefer a
+locally installed copy of TBB, since the bundled Intel binaries only target
+x86_64. Install TBB via your package manager (for instance `brew install tbb`)
+before running CMake if it is not already present, or pass
+`-DINSTANT_MESHES_USE_BUNDLED_TBB=ON` to force the legacy dependency.
+
 To build on Linux, please install the prerequisites ``libxrandr-dev``,
 ``libxinerama-dev``, ``libxcursor-dev``, and ``libxi-dev`` and then use the
 same sequence of commands shown above for MacOS.

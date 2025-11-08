@@ -26,6 +26,7 @@
 #include <vector>
 #include <atomic>
 #include <tbb/tbb.h>
+#include "tbb_compat.h"
 #include <condition_variable>
 #include <mutex>
 #include <thread>
