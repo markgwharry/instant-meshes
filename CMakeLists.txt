@@ -3,6 +3,33 @@ project(InstantMeshes)
 
 option(INSTANT_MESHES_DEV_MODE "Instant meshes developer mode" OFF)
 
+# Determine whether the bundled TBB should be used.
+set(_IM_USE_BUNDLED_TBB_DEFAULT ON)
+if (APPLE)
+  set(_im_arm64 FALSE)
+  if (DEFINED CMAKE_OSX_ARCHITECTURES AND NOT CMAKE_OSX_ARCHITECTURES STREQUAL "")
+    string(FIND "${CMAKE_OSX_ARCHITECTURES}" "arm64" _im_arm_index)
+    if (NOT _im_arm_index EQUAL -1)
+      set(_im_arm64 TRUE)
+    endif()
+  endif()
+  if (NOT _im_arm64 AND CMAKE_SYSTEM_PROCESSOR)
+    if (CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$")
+      set(_im_arm64 TRUE)
+    endif()
+  endif()
+  if (NOT _im_arm64 AND CMAKE_HOST_SYSTEM_PROCESSOR)
+    if (CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$")
+      set(_im_arm64 TRUE)
+    endif()
+  endif()
+  if (_im_arm64)
+    set(_IM_USE_BUNDLED_TBB_DEFAULT OFF)
+  endif()
+endif()
+
+option(INSTANT_MESHES_USE_BUNDLED_TBB "Build against the bundled copy of TBB" ${_IM_USE_BUNDLED_TBB_DEFAULT})
+
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   message(STATUS "Setting build type to 'Release' as none was specified.")
   set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build." FORCE)
@@ -68,15 +95,36 @@ set(NANOGUI_BUILD_PYTHON  OFF CACHE BOOL " " FORCE)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/ext/nanogui ext_build/nanogui)
 set_property(TARGET nanogui glfw glfw_objects bin2c PROPERTY FOLDER "dependencies")
 
-# Build TBB
-set(TBB_BUILD_STATIC ON CACHE BOOL " " FORCE)
-set(TBB_BUILD_SHARED OFF CACHE BOOL " " FORCE)
-set(TBB_BUILD_TBBMALLOC OFF CACHE BOOL " " FORCE)
-set(TBB_BUILD_TBBMALLOC_PROXY OFF CACHE BOOL " " FORCE)
-set(TBB_BUILD_TESTS OFF CACHE BOOL " " FORCE)
+# Build or locate TBB
+set(IM_TBB_TARGET "")
+set(IM_TBB_INCLUDE_DIRS "")
+if (INSTANT_MESHES_USE_BUNDLED_TBB)
+  set(TBB_BUILD_STATIC ON CACHE BOOL " " FORCE)
+  set(TBB_BUILD_SHARED OFF CACHE BOOL " " FORCE)
+  set(TBB_BUILD_TBBMALLOC OFF CACHE BOOL " " FORCE)
+  set(TBB_BUILD_TBBMALLOC_PROXY OFF CACHE BOOL " " FORCE)
+  set(TBB_BUILD_TESTS OFF CACHE BOOL " " FORCE)
 
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/ext/tbb ext_build/tbb)
-set_property(TARGET tbb_static tbb_def_files PROPERTY FOLDER "dependencies")
+  add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/ext/tbb ext_build/tbb)
+  set_property(TARGET tbb_static tbb_def_files PROPERTY FOLDER "dependencies")
+  set(IM_TBB_TARGET tbb_static)
+  set(IM_TBB_INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/ext/tbb/include)
+else()
+  find_package(TBB REQUIRED)
+  if (NOT TARGET TBB::tbb)
+    add_library(TBB::tbb INTERFACE IMPORTED)
+    if (TBB_INCLUDE_DIRS)
+      set_property(TARGET TBB::tbb PROPERTY INTERFACE_INCLUDE_DIRECTORIES "${TBB_INCLUDE_DIRS}")
+    endif()
+    if (TBB_LIBRARIES)
+      set_property(TARGET TBB::tbb PROPERTY INTERFACE_LINK_LIBRARIES "${TBB_LIBRARIES}")
+    endif()
+  endif()
+  set(IM_TBB_TARGET TBB::tbb)
+  if (TBB_INCLUDE_DIRS)
+    set(IM_TBB_INCLUDE_DIRS ${TBB_INCLUDE_DIRS})
+  endif()
+endif()
 
 # Compile instant meshes with various compiler warnings turned on
 if(MSVC)
@@ -98,8 +146,6 @@ include_directories(
   ${CMAKE_CURRENT_SOURCE_DIR}/ext/nanogui/include
   # NanoGUI dependencies (Eigen, GLFW, NanoVG, GLAD?)
   ${NANOGUI_EXTRA_INCS}
-  # Intel Thread Building Blocks
-  ${CMAKE_CURRENT_SOURCE_DIR}/ext/tbb/include
   # Disjoint set data structure
   ${CMAKE_CURRENT_SOURCE_DIR}/ext/dset
   # Parallel stable sort
@@ -113,6 +159,10 @@ include_directories(
   # Resource file
   ${CMAKE_CURRENT_BINARY_DIR}
 )
+
+if (IM_TBB_INCLUDE_DIRS)
+  include_directories(${IM_TBB_INCLUDE_DIRS})
+endif()
 
 # Run bin2c on resource files
 set(PNG_FILES
@@ -173,7 +223,10 @@ add_executable(InstantMeshes MACOSX_BUNDLE
   ${EXTRA_SOURCE})
 
 add_definitions(${NANOGUI_EXTRA_DEFS})
-target_link_libraries(InstantMeshes tbb_static nanogui ${NANOGUI_EXTRA_LIBS})
+if (NOT IM_TBB_TARGET)
+  message(FATAL_ERROR "Failed to configure a TBB target. Set INSTANT_MESHES_USE_BUNDLED_TBB explicitly if necessary.")
+endif()
+target_link_libraries(InstantMeshes ${IM_TBB_TARGET} nanogui ${NANOGUI_EXTRA_LIBS})
 
 set_target_properties(InstantMeshes PROPERTIES OUTPUT_NAME "Instant Meshes")
 
